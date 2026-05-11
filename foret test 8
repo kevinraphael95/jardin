@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ForestSimulator - Advanced Physics & Portal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; cursor: crosshair; }
+        #ui-stats {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 500px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; z-index: 10;
+        }
+        .bar-bg { width: 100%; height: 6px; background: rgba(0,0,0,0.8); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .bar-fill { height: 100%; transition: width 0.1s; }
+        #hp { background: #911; } #mp { background: #119; } #sp { background: #191; }
+        #top-ui { position: absolute; top: 20px; left: 20px; color: #f0e6d2; font-family: 'Cinzel'; text-shadow: 2px 2px 5px #000; z-index: 10;}
+    </style>
+</head>
+<body>
+
+<div id="top-ui"><h2>FOREST SIMULATOR</h2><p>L'autel physique est actif. Ne tombez pas.</p></div>
+<div id="ui-stats">
+    <div class="bar-bg"><div id="mp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="hp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="sp" class="bar-fill" style="width:100%"></div></div>
+</div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+    // --- CONFIGURATION ---
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.autoClear = false;
+    document.body.appendChild(renderer.domElement);
+
+    // --- SCÈNES ---
+    const mainScene = new THREE.Scene();
+    const altScene = new THREE.Scene();
+    const setupWorld = (scene, fogColor) => {
+        scene.background = new THREE.Color(fogColor);
+        scene.fog = new THREE.FogExp2(fogColor, 0.006);
+        const sun = new THREE.DirectionalLight(0xfff4e0, 2);
+        sun.position.set(100, 200, 100);
+        sun.castShadow = true;
+        scene.add(sun, new THREE.HemisphereLight(0xffffff, 0x222222, 0.6));
+    };
+    setupWorld(mainScene, 0x4a5a6a);
+    setupWorld(altScene, 0x2a1a2a);
+
+    // --- MONDE & ARBRES ---
+    const windObjs = [];
+    const colliders = []; // Format: {x, z, r}
+
+    function createTerrain(scene, isAlt) {
+        const geo = new THREE.PlaneGeometry(1000, 1000, 60, 60);
+        const pos = geo.attributes.position.array;
+        for(let i=0; i<pos.length; i+=3) {
+            pos[i+2] = Math.sin(pos[i]*0.02) * Math.cos(pos[i+1]*0.02) * 12;
+        }
+        geo.computeVertexNormals();
+        const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: isAlt ? 0x220a15 : 0x15220a }));
+        ground.rotation.x = -Math.PI/2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const ray = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+        const getY = (x, z) => {
+            ray.ray.origin.set(x, 100, z);
+            const hit = ray.intersectObject(ground);
+            return hit[0] ? hit[0].point.y : 0;
+        };
+
+        // Spawn Arbres (Ton code d'origine pour les feuilles)
+        const leafMat = new THREE.MeshStandardMaterial({color: isAlt ? 0x3a0a3a : 0x15220a});
+        for(let i=0; i<150; i++) {
+            const x = (Math.random()-0.5)*800, z = (Math.random()-0.5)*800;
+            if(Math.abs(x) < 15 && Math.abs(z) < 20) continue; 
+
+            const y = getY(x,z);
+            const h = 20 + Math.random()*20;
+            const thick = 0.6 + Math.random();
+            const tree = new THREE.Group();
+            
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(thick*0.7, thick, h), new THREE.MeshStandardMaterial({color: 0x1a0f0a}));
+            trunk.position.y = h/2 - 1;
+            tree.add(trunk);
+
+            for(let j=0; j<10; j++) {
+                const r = j/10;
+                const foliage = new THREE.Mesh(new THREE.SphereGeometry((1-r)*thick*7+2, 8, 8), leafMat);
+                foliage.scale.y = 0.6;
+                foliage.position.set((Math.random()-0.5)*2, (h*0.4)+(r*h*0.6), (Math.random()-0.5)*2);
+                tree.add(foliage);
+                if(!isAlt) windObjs.push({m:foliage, p:Math.random()*5, s:0.4, a:0.03});
+            }
+            tree.position.set(x, y, z);
+            scene.add(tree);
+            colliders.push({x, z, r: thick + 1.2}); // Collision physique du tronc
+        }
+        return getY;
+    }
+
+    const mainGetY = createTerrain(mainScene, false);
+    const altGetY = createTerrain(altScene, true);
+
+    // --- PORTAIL & AUTEL ---
+    const portalPos = { x: 0, z: -25 };
+    const pGroundY = mainGetY(portalPos.x, portalPos.z);
+    
+    const portalBase = new THREE.Group();
+    // Plateforme (Collider box)
+    const platform = new THREE.Mesh(new THREE.BoxGeometry(12, 3, 12), new THREE.MeshStandardMaterial({color: 0x222222}));
+    platform.position.y = 1.5;
+    portalBase.add(platform);
+    
+    // Cadre
+    const frame = new THREE.Group();
+    const mMat = new THREE.MeshStandardMaterial({color: 0x111111, metalness: 0.8});
+    const left = new THREE.Mesh(new THREE.BoxGeometry(0.6, 7, 0.6), mMat); left.position.set(-2.5, 3.5, 0);
+    const right = left.clone(); right.position.x = 2.5;
+    const top = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.6, 0.6), mMat); top.position.y = 7;
+    frame.add(left, right, top);
+    frame.position.y = 3;
+    portalBase.add(frame);
+
+    portalBase.position.set(portalPos.x, pGroundY, portalPos.z);
+    mainScene.add(portalBase);
+    altScene.add(portalBase.clone());
+
+    // Plan Invisible (Stencil)
+    const portalPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(4.4, 6.4),
+        new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false })
+    );
+    portalPlane.position.set(portalPos.x, pGroundY + 6.2, portalPos.z);
+
+    // --- PHYSIQUE DU JOUEUR ---
+    const controls = new PointerLockControls(camera, document.body);
+    document.body.addEventListener('click', () => controls.lock());
+
+    let velocity = new THREE.Vector3();
+    let playerInAlt = false;
+    let jumpVel = 0, isGrounded = true, stamina = 100;
+    const keys = { w:false, s:false, a:false, d:false, shift:false };
+
+    document.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase();
+        if(k === 'w' || k === 'z') keys.w = true;
+        if(k === 's') keys.s = true;
+        if(k === 'a' || k === 'q') keys.a = true;
+        if(k === 'd') keys.d = true;
+        if(e.shiftKey) keys.shift = true;
+        if(e.code === 'Space' && isGrounded) jumpVel = 0.3;
+    });
+    document.addEventListener('keyup', (e) => {
+        const k = e.key.toLowerCase();
+        if(k === 'w' || k === 'z') keys.w = false;
+        if(k === 's') keys.s = false;
+        if(k === 'a' || k === 'q') keys.a = false;
+        if(k === 'd') keys.d = false;
+        if(!e.shiftKey) keys.shift = false;
+    });
+
+    camera.position.set(0, 5, 10);
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        const t = time * 0.001;
+        windObjs.forEach(o => o.m.rotation.z = Math.sin(t * o.s + o.p) * o.a);
+
+        if(controls.isLocked) {
+            // 1. Calcul accélération
+            const isRunning = keys.shift && stamina > 20;
+            const speed = isRunning ? 0.06 : 0.03;
+            stamina = isRunning ? Math.max(0, stamina - 0.5) : Math.min(100, stamina + 0.2);
+            document.getElementById('sp').style.width = stamina + "%";
+
+            const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const rightVec = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+            forward.y = 0; rightVec.y = 0; forward.normalize(); rightVec.normalize();
+
+            if(keys.w) velocity.add(forward.multiplyScalar(speed));
+            if(keys.s) velocity.sub(forward.multiplyScalar(speed));
+            if(keys.a) velocity.sub(rightVec.multiplyScalar(speed));
+            if(keys.d) velocity.add(rightVec.multiplyScalar(speed));
+
+            // 2. Friction (Le glissé)
+            velocity.multiplyScalar(0.85);
+
+            // 3. Application mouvement & Collision "Sliding"
+            let nextX = camera.position.x + velocity.x;
+            let nextZ = camera.position.z + velocity.z;
+
+            // Collision Arbres
+            colliders.forEach(c => {
+                const dx = nextX - c.x;
+                const dz = nextZ - c.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if(dist < c.r) {
+                    const angle = Math.atan2(dz, dx);
+                    nextX = c.x + Math.cos(angle) * c.r;
+                    nextZ = c.z + Math.sin(angle) * c.r;
+                    velocity.multiplyScalar(0.9); // Ralentit un peu au contact
+                }
+            });
+
+            // Traversée Portail
+            const oldZ = camera.position.z - portalPos.z;
+            const newZ = nextZ - portalPos.z;
+            if(Math.sign(oldZ) !== Math.sign(newZ) && Math.abs(nextX - portalPos.x) < 2.2) {
+                if(camera.position.y > pGroundY + 3.5) playerInAlt = !playerInAlt;
+            }
+
+            camera.position.x = nextX;
+            camera.position.z = nextZ;
+
+            // 4. Gestion de la hauteur (Terrain + Autel)
+            const getY = playerInAlt ? altGetY : mainGetY;
+            let targetY = getY(camera.position.x, camera.position.z);
+            
+            // Collision Autel (Box)
+            if(Math.abs(camera.position.x - portalPos.x) < 6 && Math.abs(camera.position.z - portalPos.z) < 6) {
+                targetY = Math.max(targetY, pGroundY + 3);
+            }
+
+            jumpVel -= 0.015;
+            camera.position.y += jumpVel;
+            if(camera.position.y < targetY + 1.8) {
+                camera.position.y = targetY + 1.8;
+                jumpVel = 0;
+                isGrounded = true;
+            } else {
+                isGrounded = false;
+            }
+        }
+
+        // --- RENDU NON-EUCLIDIEN ---
+        const gl = renderer.getContext();
+        renderer.clear();
+        renderer.state.buffers.stencil.setTest(true);
+
+        // A. Marquer le stencil
+        renderer.state.buffers.stencil.setFunc(gl.ALWAYS, 1, 0xff);
+        renderer.state.buffers.stencil.setOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+        renderer.render(portalPlane, camera);
+
+        // B. Dessiner l'autre monde dans la zone
+        renderer.state.buffers.stencil.setFunc(gl.EQUAL, 1, 0xff);
+        renderer.state.buffers.stencil.setOp(gl.KEEP, gl.KEEP, gl.KEEP);
+        renderer.clearDepth();
+        renderer.render(playerInAlt ? mainScene : altScene, camera);
+
+        // C. Dessiner le monde actuel autour
+        renderer.state.buffers.stencil.setFunc(gl.NOTEQUAL, 1, 0xff);
+        renderer.render(playerInAlt ? altScene : mainScene, camera);
+
+        renderer.state.buffers.stencil.setTest(false);
+    }
+    animate(0);
+</script>
+</body>
+</html>
