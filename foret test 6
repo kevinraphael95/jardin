@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ForestSimulator - Skyrim Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; cursor: crosshair; }
+        #top-ui { position: absolute; top: 20px; left: 20px; color: #f0e6d2; font-family: 'Cinzel'; text-shadow: 2px 2px 5px #000; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div id="top-ui"><h2>FOREST SIMULATOR</h2><p>ESPACE pour sauter | SHIFT pour courir</p></div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); 
+    scene.fog = new THREE.FogExp2(0x87CEEB, 0.005); // Brouillard légèrement plus dense pour l'ambiance
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+
+    // --- SKYBOX ---
+    const skyGeo = new THREE.SphereGeometry(2000, 32, 32);
+    const skyMat = new THREE.MeshBasicMaterial({ color: 0x4488ff, side: THREE.BackSide });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(sky);
+
+    // --- LUMIÈRE (Grand jour magique) ---
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x080808, 1.0));
+    const sun = new THREE.DirectionalLight(0xfff0dd, 3.5);
+    sun.position.set(100, 300, 100);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    scene.add(sun);
+
+    // --- TERRAIN ---
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
+    const pos = groundGeo.attributes.position.array;
+    const colors = [];
+    for(let i=0; i<pos.length; i+=3) {
+        const x = pos[i];
+        const y = pos[i+1];
+        pos[i+2] = Math.sin(x*0.03) * Math.cos(y*0.03) * 10;
+        
+        // Simuler des chemins de terre (zones de bruit)
+        const isPath = Math.abs(Math.sin(x * 0.01) + Math.cos(y * 0.01)) < 0.2;
+        if(isPath) colors.push(0.4, 0.3, 0.2); // Terre
+        else colors.push(0.1, 0.17, 0.06); // Herbe sombre
+    }
+    groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    ground.updateMatrixWorld();
+
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+    function findY(x, z) {
+        raycaster.ray.origin.set(x, 100, z);
+        const hit = raycaster.intersectObject(ground);
+        return hit.length > 0 ? hit[0].point.y : 0;
+    }
+
+    const windObjs = [];
+    const colliders = [];
+    const fireflies = [];
+
+    // --- NOUVEAUX ASSETS SKYRIM ---
+
+    function spawnMushroom(x, z) {
+        const y = findY(x, z);
+        const group = new THREE.Group();
+        const capColor = Math.random() > 0.5 ? 0x00ffff : 0xff44aa; // Bleu ou Rose magique
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshStandardMaterial({color: capColor, emissive: capColor, emissiveIntensity: 2}));
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.5), new THREE.MeshStandardMaterial({color: 0xcccccc}));
+        cap.position.y = 0.4;
+        group.add(cap, stem);
+        group.position.set(x, y, z);
+        scene.add(group);
+    }
+
+    function spawnRock(x, z) {
+        const y = findY(x, z);
+        const size = 1 + Math.random() * 3;
+        const rock = new THREE.Mesh(
+            new THREE.DodecahedronGeometry(size, 0),
+            new THREE.MeshStandardMaterial({color: 0x555555, roughness: 0.9})
+        );
+        rock.position.set(x, y - 0.5, z);
+        rock.rotation.set(Math.random(), Math.random(), Math.random());
+        scene.add(rock);
+        colliders.push({ x: x, z: z, r: size });
+    }
+
+    function spawnFence(x, z) {
+        const y = findY(x, z);
+        const group = new THREE.Group();
+        const mat = new THREE.MeshStandardMaterial({color: 0x3d2b1f});
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.5, 0.3), mat);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(3, 0.2, 0.1), mat);
+        rail.position.set(1.5, 0.5, 0);
+        group.add(post, rail);
+        group.position.set(x, y, z);
+        scene.add(group);
+    }
+
+    function spawnPond(x, z) {
+        const y = findY(x, z) + 0.1;
+        const pond = new THREE.Mesh(
+            new THREE.CircleGeometry(5 + Math.random()*5, 16),
+            new THREE.MeshStandardMaterial({color: 0x004466, transparent: true, opacity: 0.7, metalness: 0.9, roughness: 0.1})
+        );
+        pond.rotation.x = -Math.PI/2;
+        pond.position.set(x, y, z);
+        scene.add(pond);
+    }
+
+    // --- FONCTIONS EXISTANTES ---
+    function spawnGrass(x, z) {
+        const y = findY(x, z);
+        const grass = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.04, 0.5 + Math.random(), 3), new THREE.MeshStandardMaterial({color: 0x2d4c1e}));
+        grass.position.set(x, y + 0.2, z);
+        scene.add(grass);
+        windObjs.push({ mesh: grass, phase: Math.random() * 5, speed: 4, amp: 0.1 });
+    }
+
+    function spawnFirefly() {
+        const ff = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xffffaa}));
+        const x = (Math.random()-0.5)*300, z = (Math.random()-0.5)*300;
+        ff.position.set(x, findY(x,z) + 2, z);
+        scene.add(ff);
+        fireflies.push({ mesh: ff, offset: Math.random() * 10, baseHeight: ff.position.y });
+    }
+
+    function spawnTree(x, z) {
+        const y = findY(x, z);
+        const treeGroup = new THREE.Group();
+        const height = 15 + Math.random() * 20;
+        const trunkThickness = 1.0 + Math.random() * 0.8;
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkThickness * 0.5, trunkThickness, height, 8), new THREE.MeshStandardMaterial({color: 0x1a0f0a}));
+        trunk.position.y = height / 2 - 0.5;
+        treeGroup.add(trunk);
+        const layerCount = 7 + Math.floor(Math.random() * 6);
+        for(let i=0; i<layerCount; i++) {
+            const ratio = i / layerCount;
+            const size = (1 - ratio) * (trunkThickness * 9) + 2;
+            const layer = new THREE.Mesh(new THREE.ConeGeometry(size, 8, 8), new THREE.MeshStandardMaterial({color: 0x0a1a0a}));
+            layer.position.y = height * 0.35 + (ratio * height * 0.7);
+            layer.castShadow = true;
+            treeGroup.add(layer);
+            windObjs.push({ mesh: layer, phase: Math.random() * 5, speed: 0.4, amp: 0.015 });
+        }
+        treeGroup.position.set(x, y, z);
+        scene.add(treeGroup);
+        colliders.push({ x: x, z: z, r: trunkThickness + 0.4 });
+    }
+
+    // --- REMPLISSAGE DU MONDE ---
+    for(let i=0; i<100; i++) spawnTree((Math.random()-0.5)*600, (Math.random()-0.5)*600);
+    for(let i=0; i<1000; i++) spawnGrass((Math.random()-0.5)*500, (Math.random()-0.5)*500);
+    for(let i=0; i<50; i++) spawnFirefly();
+    for(let i=0; i<40; i++) spawnRock((Math.random()-0.5)*400, (Math.random()-0.5)*400);
+    for(let i=0; i<60; i++) spawnMushroom((Math.random()-0.5)*300, (Math.random()-0.5)*300);
+    for(let i=0; i<15; i++) spawnPond((Math.random()-0.5)*400, (Math.random()-0.5)*400);
+    for(let i=0; i<30; i++) spawnFence((Math.random()-0.5)*300, (Math.random()-0.5)*300);
+
+    // --- CONTROLES, SAUT & PHYSIQUE ---
+    const controls = new PointerLockControls(camera, document.body);
+    document.body.addEventListener('click', () => controls.lock());
+    let velocity = new THREE.Vector3(), keys = { z:false, s:false, q:false, d:false, shift: false };
+    let vY = 0; let canJump = false;
+
+    document.addEventListener('keydown', (e) => { 
+        const key = e.key.toLowerCase();
+        if(keys.hasOwnProperty(key)) keys[key] = true; 
+        if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.shift = true;
+        if(e.code === 'Space' && canJump) { vY = 0.25; canJump = false; }
+    });
+    document.addEventListener('keyup', (e) => { 
+        const key = e.key.toLowerCase();
+        if(keys.hasOwnProperty(key)) keys[key] = false; 
+        if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') keys.shift = false;
+    });
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        const t = time * 0.001;
+
+        windObjs.forEach(obj => { obj.mesh.rotation.z = Math.sin(t * obj.speed + obj.phase) * obj.amp; });
+        fireflies.forEach(ff => { ff.mesh.position.y = ff.baseHeight + Math.sin(t + ff.offset); });
+
+        if(controls.isLocked) {
+            // Courir si Shift est pressé
+            const currentAccel = keys.shift ? 0.045 : 0.02; 
+            const friction = 0.9;
+            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+            f.y = 0; r.y = 0; f.normalize(); r.normalize();
+
+            if(keys.z) velocity.add(f.multiplyScalar(currentAccel));
+            if(keys.s) velocity.sub(f.multiplyScalar(currentAccel));
+            if(keys.q) velocity.sub(r.multiplyScalar(currentAccel));
+            if(keys.d) velocity.add(r.multiplyScalar(currentAccel));
+
+            velocity.multiplyScalar(friction);
+            vY -= 0.01; 
+
+            let nextX = camera.position.x + velocity.x;
+            let nextZ = camera.position.z + velocity.z;
+            let nextY = camera.position.y + vY;
+
+            colliders.forEach(c => {
+                const dx = nextX - c.x, dz = nextZ - c.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if(dist < c.r) {
+                    const angle = Math.atan2(dz, dx);
+                    nextX = c.x + Math.cos(angle) * c.r;
+                    nextZ = c.z + Math.sin(angle) * c.r;
+                }
+            });
+
+            const groundLimit = findY(nextX, nextZ) + 1.8;
+            if(nextY <= groundLimit) {
+                nextY = groundLimit;
+                vY = 0;
+                canJump = true;
+            }
+            camera.position.set(nextX, nextY, nextZ);
+        }
+        renderer.render(scene, camera);
+    }
+    animate(0);
+</script>
+</body>
+</html>
