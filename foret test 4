@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ForestSimulator - Expert Flora</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; cursor: crosshair; }
+        #ui-stats {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 500px; display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+        }
+        .bar-bg { width: 100%; height: 6px; background: rgba(0,0,0,0.8); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .bar-fill { height: 100%; transition: width 0.3s; }
+        #hp { background: #911; } #mp { background: #119; } #sp { background: #191; }
+        #top-ui { position: absolute; top: 20px; left: 20px; color: #f0e6d2; font-family: 'Cinzel'; text-shadow: 2px 2px 5px #000; }
+    </style>
+</head>
+<body>
+
+<div id="top-ui"><h2>FOREST SIMULATOR</h2><p>Végétation Dense & Collisions Organiques</p></div>
+<div id="ui-stats">
+    <div class="bar-bg"><div id="mp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="hp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="sp" class="bar-fill" style="width:100%"></div></div>
+</div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x2a3a4a);
+    scene.fog = new THREE.FogExp2(0x2a3a4a, 0.006);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+
+    // --- LUMIÈRE ---
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x080808, 0.8));
+    const sun = new THREE.DirectionalLight(0xfff0dd, 2.5);
+    sun.position.set(100, 300, 100);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    scene.add(sun);
+
+    // --- TERRAIN ---
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
+    const pos = groundGeo.attributes.position.array;
+    for(let i=0; i<pos.length; i+=3) {
+        pos[i+2] = Math.sin(pos[i]*0.03) * Math.cos(pos[i+1]*0.03) * 10;
+    }
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({ color: 0x1a2b10, roughness: 1 }));
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    ground.updateMatrixWorld();
+
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+    function findY(x, z) {
+        raycaster.ray.origin.set(x, 100, z);
+        const hit = raycaster.intersectObject(ground);
+        return hit.length > 0 ? hit[0].point.y : 0;
+    }
+
+    const windObjs = [];
+    const colliders = [];
+
+    // --- CRÉATION DE LA FLORE ---
+    function spawnFlower(x, z) {
+        const y = findY(x, z);
+        const flowerGroup = new THREE.Group();
+        
+        // Tige
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.8), new THREE.MeshStandardMaterial({color: 0x2d4c1e}));
+        stem.position.y = 0.4;
+        flowerGroup.add(stem);
+
+        // Cœur et Pétales
+        const colors = [0xff4444, 0x4444ff, 0xffff44, 0xffffff];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), new THREE.MeshStandardMaterial({color: color}));
+        head.position.y = 0.8;
+        flowerGroup.add(head);
+
+        flowerGroup.position.set(x, y, z);
+        flowerGroup.rotation.z = (Math.random() - 0.5) * 0.2;
+        scene.add(flowerGroup);
+        windObjs.push({ mesh: flowerGroup, phase: Math.random() * 5, speed: 2, amp: 0.05 });
+    }
+
+    function spawnTree(x, z) {
+        const y = findY(x, z);
+        const treeGroup = new THREE.Group();
+        const height = 15 + Math.random() * 20;
+        const trunkThickness = 0.8 + Math.random() * 0.8;
+
+        // Tronc conique pour un aspect plus épais à la base
+        const trunk = new THREE.Mesh(
+            new THREE.CylinderGeometry(trunkThickness * 0.4, trunkThickness, height, 8), 
+            new THREE.MeshStandardMaterial({color: 0x1a0f0a})
+        );
+        trunk.position.y = height / 2 - 0.5;
+        treeGroup.add(trunk);
+
+        // Canopée variée
+        const layerCount = 6 + Math.floor(Math.random() * 6);
+        for(let i=0; i<layerCount; i++) {
+            const ratio = i / layerCount;
+            const size = (1 - ratio) * (trunkThickness * 8) + 1;
+            const layer = new THREE.Mesh(
+                new THREE.ConeGeometry(size, 6, 8),
+                new THREE.MeshStandardMaterial({color: 0x0a1a0a})
+            );
+            layer.position.y = height * 0.3 + (ratio * height * 0.8);
+            layer.castShadow = true;
+            treeGroup.add(layer);
+            windObjs.push({ mesh: layer, phase: Math.random() * 5, speed: 0.5, amp: 0.02 });
+        }
+
+        treeGroup.position.set(x, y, z);
+        scene.add(treeGroup);
+        colliders.push({ x: x, z: z, r: trunkThickness + 0.5 });
+    }
+
+    // Génération
+    for(let i=0; i<120; i++) spawnTree((Math.random()-0.5)*600, (Math.random()-0.5)*600);
+    for(let i=0; i<400; i++) spawnFlower((Math.random()-0.5)*300, (Math.random()-0.5)*300);
+
+    // --- CONTROLES & COLLISION SLIDING ---
+    const controls = new PointerLockControls(camera, document.body);
+    document.body.addEventListener('click', () => controls.lock());
+    let velocity = new THREE.Vector3(), keys = { z:false, s:false, q:false, d:false };
+    document.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
+    document.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        const t = time * 0.001;
+
+        // Animation Vent asynchrone
+        windObjs.forEach(obj => {
+            obj.mesh.rotation.z = Math.sin(t * obj.speed + obj.phase) * obj.amp;
+        });
+
+        if(controls.isLocked) {
+            const accel = 0.02, friction = 0.9;
+            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+            f.y = 0; r.y = 0; f.normalize(); r.normalize();
+
+            if(keys.z) velocity.add(f.multiplyScalar(accel));
+            if(keys.s) velocity.sub(f.multiplyScalar(accel));
+            if(keys.q) velocity.sub(r.multiplyScalar(accel));
+            if(keys.d) velocity.add(r.multiplyScalar(accel));
+
+            velocity.multiplyScalar(friction);
+
+            // Simulation de collision avec glissement
+            let nextX = camera.position.x + velocity.x;
+            let nextZ = camera.position.z + velocity.z;
+
+            colliders.forEach(c => {
+                const dx = nextX - c.x;
+                const dz = nextZ - c.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if(dist < c.r) {
+                    const angle = Math.atan2(dz, dx);
+                    nextX = c.x + Math.cos(angle) * c.r;
+                    nextZ = c.z + Math.sin(angle) * c.r;
+                    velocity.multiplyScalar(0.95); // Ralentissement au contact
+                }
+            });
+
+            camera.position.x = nextX;
+            camera.position.z = nextZ;
+
+            // Hauteur dynamique (Sol)
+            const groundY = findY(camera.position.x, camera.position.z) + 1.8;
+            camera.position.y += (groundY - camera.position.y) * 0.1;
+        }
+
+        renderer.render(scene, camera);
+    }
+    animate(0);
+</script>
+</body>
+</html>
