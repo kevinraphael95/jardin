@@ -1,283 +1,312 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mon Jardin Japonais & Inventaire</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #1a1a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
-        #game-container { width: 100vw; height: 100vh; position: relative; overflow: hidden; background: #87ceeb; }
-        canvas { display: block; width: 100%; height: 100%; }
 
-        /* UI Outils */
-        .ui { position: absolute; top: 20px; left: 20px; display: flex; flex-direction: column; gap: 15px; z-index: 100; }
-        .btn { width: 60px; height: 60px; border-radius: 18px; border: 3px solid white; background: rgba(255,255,255,0.8); font-size: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 15px rgba(0,0,0,0.2); backdrop-filter: blur(5px); }
-        .btn.active { background: #ffd87a; border-color: #d4a017; transform: scale(1.1); }
-
-        /* Inventaire */
-        .inventory { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.2); border-radius: 15px; padding: 15px; color: white; min-width: 150px; backdrop-filter: blur(10px); z-index: 100; }
-        .inv-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px; display: flex; align-items: center; gap: 5px; }
-        .inv-item { display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0; }
-        .inv-empty { font-style: italic; opacity: 0.6; font-size: 12px; }
-
-        .hud { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 25px; border-radius: 50px; font-size: 13px; z-index: 100; border: 1px solid rgba(255,255,255,0.1); }
-        kbd { background: #333; padding: 2px 6px; border-radius: 4px; color: #ffda79; font-weight: bold; }
-    </style>
-</head>
-<body>
-
-<div id="game-container">
-    <canvas id="canvas"></canvas>
-    
-    <div class="ui">
-        <div class="btn active" id="btn-plant" onclick="setTool('plant')">🌱</div>
-        <div class="btn" id="btn-cut" onclick="setTool('cut')">✂️</div>
-    </div>
-
-    <div class="inventory" id="inventory">
-        <div class="inv-title">📦 Inventaire</div>
-        <div id="inv-list"><div class="inv-empty">Vide...</div></div>
-    </div>
-
-    <div class="hud">
-        <kbd>Z Q S D</kbd> Marcher | <kbd>ESPACE</kbd> Sauter | <kbd>CLIC</kbd> Action
-    </div>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+#gw{width:100%;height:560px;position:relative;overflow:hidden;background:#87ceeb;cursor:crosshair}
+#gw canvas{position:absolute;inset:0;width:100%;height:100%}
+.tbr{position:absolute;top:14px;right:16px;display:flex;gap:10px;z-index:10}
+.tb{width:46px;height:46px;border-radius:50%;border:2.5px solid rgba(255,255,255,0.8);background:rgba(255,255,255,0.88);font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s,background .15s;box-shadow:0 3px 10px rgba(0,0,0,.18)}
+.tb:hover{transform:scale(1.12);background:#fff}
+.tb.on{background:#ffd87a;border-color:#d4a017}
+</style>
+<div id="gw">
+  <canvas id="c"></canvas>
+  <div class="tbr">
+    <div class="tb on" id="bP" title="Planter" onclick="tool='plant';sync()">🌱</div>
+    <div class="tb" id="bC" title="Couper" onclick="tool='cut';sync()">✂️</div>
+  </div>
 </div>
-
 <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    let w, h, tool = 'plant';
-    let flowers = [], blades = [], time = 0;
-    let inventory = {};
+const wrap=document.getElementById('gw');
+const cv=document.getElementById('c');
+const cx=cv.getContext('2d');
+let W,H,tool='plant';
+let flowers=[],blades=[],particles=[];
+let wind=0,wt=0,ts=0;
 
-    // --- CONFIG PERSONNAGE ---
-    const player = {
-        x: window.innerWidth/2, y: window.innerHeight/2,
-        vx: 0, vy: 0,
-        speed: 2.8, // Vitesse réduite comme demandé
-        friction: 0.85,
-        dir: 1,
-        z: 0, // Hauteur du saut
-        vz: 0,
-        isJumping: false,
-        gravity: 0.5
-    };
+function sync(){
+  document.getElementById('bP').classList.toggle('on',tool==='plant');
+  document.getElementById('bC').classList.toggle('on',tool==='cut');
+  wrap.style.cursor=tool==='cut'?'none':'crosshair';
+}
 
-    const keys = {};
-    window.addEventListener('keydown', e => {
-        keys[e.code] = true;
-        if(e.code === 'Space' && !player.isJumping) {
-            player.vz = -8;
-            player.isJumping = true;
-        }
+function rsz(){
+  const r=wrap.getBoundingClientRect();
+  W=cv.width=r.width;H=cv.height=r.height;
+  initBlades();
+}
+
+const ROWS=6;
+const HORIZON=()=>H*0.42;
+const ROW_Y=(row)=>HORIZON()+(row/ROWS)*(H-HORIZON());
+const ROW_SCALE=(row)=>0.18+0.82*(row/ROWS);
+const SOIL_COLOR=['#8B6914','#7a5c10','#6e5010'];
+
+function initBlades(){
+  blades=[];
+  for(let row=0;row<ROWS;row++){
+    const y=ROW_Y(row);
+    const sc=ROW_SCALE(row);
+    const density=Math.floor(W/(4+4*(1-row/ROWS)));
+    for(let i=0;i<density;i++){
+      const x=Math.random()*W;
+      blades.push({
+        x,row,y,sc,
+        len:(14+Math.random()*28)*sc,
+        w:(1.0+Math.random()*1.2)*sc,
+        bend:(Math.random()-.5)*0.5,
+        phase:Math.random()*Math.PI*2,
+        col:row<2?'#3d6b1a':(row<4?'#4a7e22':'#5a9428'),
+        col2:row<2?'#2d5212':(row<4?'#386018':'#467020'),
+      });
+    }
+  }
+  blades.sort((a,b)=>a.row-b.row||(a.y-b.y));
+}
+
+const PALS=[
+  {p:'#ff6b6b',c:'#ffeb3b',s:'#4caf50',s2:'#2e7d32'},
+  {p:'#ff9ff3',c:'#ffe082',s:'#43a047',s2:'#1b5e20'},
+  {p:'#ffd93d',c:'#ff6b35',s:'#388e3c',s2:'#1b5e20'},
+  {p:'#74b9ff',c:'#fdcb6e',s:'#2e7d32',s2:'#1b5e20'},
+  {p:'#a29bfe',c:'#fdcb6e',s:'#388e3c',s2:'#1b5e20'},
+  {p:'#fd79a8',c:'#fff176',s:'#4caf50',s2:'#2e7d32'},
+  {p:'#55efc4',c:'#f9ca24',s:'#43a047',s2:'#1b5e20'},
+];
+const SHAPES=['daisy','star','round','tulip'];
+
+function addFlower(mx,my){
+  let bestRow=-1,bestDist=9999;
+  for(let row=0;row<ROWS;row++){
+    const ry=ROW_Y(row);
+    const d=Math.abs(my-ry);
+    if(d<bestDist){bestDist=d;bestRow=row;}
+  }
+  if(bestRow<0)return;
+  const row=bestRow;
+  const sc=ROW_SCALE(row);
+  const pal=PALS[Math.floor(Math.random()*PALS.length)];
+  const shape=SHAPES[Math.floor(Math.random()*SHAPES.length)];
+  const targetH=(40+Math.random()*60)*sc;
+  flowers.push({
+    x:mx,row,baseY:ROW_Y(row),sc,
+    h:0,targetH,
+    phase:Math.random()*Math.PI*2,
+    pal,shape,
+    np:5+Math.floor(Math.random()*4),
+    pr:(5+Math.random()*9)*sc,
+    born:performance.now(),
+    grown:false,dead:false
+  });
+  flowers.sort((a,b)=>a.row-b.row);
+}
+
+function cutFlower(mx,my){
+  let best=null,bd=35;
+  flowers.forEach(f=>{
+    if(f.dead)return;
+    const fy=f.baseY-f.h;
+    const d=Math.hypot(mx-f.x,my-fy);
+    if(d<bd){bd=d;best=f;}
+  });
+  if(best){best.dead=true;spawnPetals(best);}
+}
+
+function spawnPetals(f){
+  for(let i=0;i<10;i++){
+    particles.push({
+      x:f.x,y:f.baseY-f.h,
+      vx:(Math.random()-.5)*5,vy:-3-Math.random()*3,
+      col:f.pal.p,r:(3+Math.random()*4)*f.sc,
+      life:1,decay:.014+Math.random()*.016,
+      rot:Math.random()*Math.PI*2,rv:(Math.random()-.5)*.18,
     });
-    window.addEventListener('keyup', e => keys[e.code] = false);
+  }
+}
 
-    // --- TYPES DE FLEURS (Variétés réelles) ---
-    const FLOWER_TYPES = [
-        { name: 'Coquelicot', main: '#e74c3c', center: '#2c3e50', petals: 4, size: 10, shape: 'round' },
-        { name: 'Marguerite', main: '#ffffff', center: '#f1c40f', petals: 12, size: 8, shape: 'daisy' },
-        { name: 'Bleuet', main: '#3498db', center: '#2980b9', petals: 8, size: 7, shape: 'star' },
-        { name: 'Lavande', main: '#9b59b6', center: '#8e44ad', petals: 3, size: 4, shape: 'tall' },
-        { name: 'Souci', main: '#f39c12', center: '#d35400', petals: 10, size: 9, shape: 'round' }
-    ];
+function drawSky(t){
+  const grd=cx.createLinearGradient(0,0,0,HORIZON());
+  grd.addColorStop(0,'#4a90d9');
+  grd.addColorStop(1,'#a8d8f0');
+  cx.fillStyle=grd;
+  cx.fillRect(0,0,W,HORIZON());
+  cx.fillStyle='rgba(255,255,255,0.55)';
+  [[W*.15,H*.08,60,22],[W*.5,H*.06,90,28],[W*.78,H*.1,50,18]].forEach(([cx2,cy2,rw,rh])=>{
+    const bx=cx2+Math.sin(t*.04+cx2)*6;
+    cx.beginPath();
+    cx.ellipse(bx,cy2,rw,rh,0,0,Math.PI*2);
+    cx.fill();
+    cx.beginPath();
+    cx.ellipse(bx+rw*.4,cy2-rh*.2,rw*.6,rh*.7,0,0,Math.PI*2);
+    cx.fill();
+    cx.beginPath();
+    cx.ellipse(bx-rw*.35,cy2-rh*.15,rw*.55,rh*.65,0,0,Math.PI*2);
+    cx.fill();
+  });
+}
 
-    function setTool(t) {
-        tool = t;
-        document.getElementById('btn-plant').classList.toggle('active', t === 'plant');
-        document.getElementById('btn-cut').classList.toggle('active', t === 'cut');
+function drawGround(){
+  const hz=HORIZON();
+  for(let row=ROWS-1;row>=0;row--){
+    const y0=row===0?hz:ROW_Y(row-1);
+    const y1=ROW_Y(row);
+    const lightness=35+row*8;
+    const grd=cx.createLinearGradient(0,y0,0,y1);
+    grd.addColorStop(0,`hsl(105,${40+row*4}%,${lightness+8}%)`);
+    grd.addColorStop(1,`hsl(105,${38+row*4}%,${lightness}%)`);
+    cx.fillStyle=grd;
+    cx.beginPath();
+    cx.moveTo(0,y0);cx.lineTo(W,y0);cx.lineTo(W,y1);cx.lineTo(0,y1);
+    cx.fill();
+  }
+  cx.fillStyle='#7a5c12';
+  cx.fillRect(0,ROW_Y(ROWS-1),W,H-ROW_Y(ROWS-1));
+}
+
+function drawBlade(b,t){
+  const woff=wind*b.sc*3+Math.sin(t*0.9+b.phase)*b.sc*1.2;
+  const tipX=b.x+Math.sin(b.bend+woff*0.5)*b.len*0.7;
+  const tipY=b.y-b.len;
+  const midX=b.x+(tipX-b.x)*0.45+woff*0.3;
+  const midY=b.y-b.len*0.55;
+  const grd=cx.createLinearGradient(b.x,b.y,tipX,tipY);
+  grd.addColorStop(0,b.col2);
+  grd.addColorStop(1,b.col);
+  cx.beginPath();
+  cx.moveTo(b.x,b.y);
+  cx.quadraticCurveTo(midX,midY,tipX,tipY);
+  cx.strokeStyle=grd;
+  cx.lineWidth=b.w;
+  cx.lineCap='round';
+  cx.stroke();
+}
+
+function drawFlower(f,t){
+  if(f.dead)return;
+  const now=performance.now();
+  if(!f.grown){
+    const el=(now-f.born)*.001;
+    f.h=Math.min(f.targetH,f.targetH*(el/1.6));
+    if(f.h>=f.targetH)f.grown=true;
+  }
+  const woff=wind*f.sc*2+Math.sin(t*0.85+f.phase)*f.sc*0.9;
+  const tipX=f.x+Math.sin(woff*0.6)*f.h*0.35;
+  const tipY=f.baseY-f.h;
+  const midX=f.x+(tipX-f.x)*.5+woff*.5;
+  const midY=f.baseY-f.h*.55;
+  cx.beginPath();
+  cx.moveTo(f.x,f.baseY);
+  cx.quadraticCurveTo(midX,midY,tipX,tipY);
+  cx.strokeStyle=f.pal.s;
+  cx.lineWidth=2.2*f.sc;
+  cx.lineCap='round';
+  cx.stroke();
+  if(f.h>f.targetH*.12){
+    const leafT=0.4;
+    const lx=f.x+(tipX-f.x)*leafT+woff*.3;
+    const ly=f.baseY-(f.h*leafT);
+    const angle=Math.PI/4+woff*0.1;
+    const ls=8*f.sc;
+    cx.beginPath();
+    cx.ellipse(lx+Math.cos(angle)*ls,ly-Math.sin(angle)*ls,ls,ls*0.4,angle,0,Math.PI*2);
+    cx.fillStyle=f.pal.s2||f.pal.s;
+    cx.fill();
+  }
+  if(f.h>f.targetH*.3){
+    const prog=Math.min(1,(f.h-f.targetH*.3)/(f.targetH*.7));
+    drawHead(f,tipX,tipY,prog,t);
+  }
+}
+
+function drawHead(f,tx,ty,prog,t){
+  const r=f.pr*prog;
+  const n=f.np;
+  const wo=Math.sin(t*0.85+f.phase)*0.06;
+  cx.save();
+  cx.translate(tx,ty);
+  cx.rotate(wo);
+  if(f.shape==='daisy'||f.shape==='round'){
+    for(let i=0;i<n;i++){
+      const a=(i/n)*Math.PI*2;
+      cx.beginPath();
+      cx.ellipse(Math.cos(a)*r*1.1,Math.sin(a)*r*1.1,r*.48,r*.82,a,0,Math.PI*2);
+      cx.fillStyle=f.pal.p;cx.fill();
     }
-
-    const ROWS = 15; 
-    const HORIZON = () => h * 0.4;
-    const getY = (row) => HORIZON() + (row / ROWS) * (h - HORIZON());
-    const getScale = (y) => 0.3 + 0.7 * ((y - HORIZON()) / (h - HORIZON()));
-
-    function init() {
-        w = canvas.width = window.innerWidth;
-        h = canvas.height = window.innerHeight;
-        blades = [];
-        // Génération d'une herbe plus "organique" et moins alignée
-        for (let i = 0; i < 600; i++) {
-            const ry = HORIZON() + Math.random() * (h - HORIZON());
-            const sc = getScale(ry);
-            blades.push({
-                x: Math.random() * w,
-                y: ry,
-                sc: sc,
-                h: (20 + Math.random() * 30) * sc,
-                w: (1 + Math.random() * 2) * sc,
-                off: Math.random() * 100,
-                c: `hsl(${80 + Math.random() * 40}, ${30 + (ry/h)*20}%, ${20 + (ry/h)*15}%)`
-            });
-        }
-        blades.sort((a,b) => a.y - b.y);
+    cx.beginPath();cx.arc(0,0,r*.52,0,Math.PI*2);
+    cx.fillStyle=f.pal.c;cx.fill();
+  } else if(f.shape==='tulip'){
+    cx.beginPath();
+    cx.ellipse(0,0,r*.85,r*1.3,0,0,Math.PI*2);
+    cx.fillStyle=f.pal.p;cx.fill();
+    cx.beginPath();
+    cx.ellipse(0,r*.3,r*.5,r*.85,0,0,Math.PI*2);
+    cx.fillStyle=f.pal.c;cx.globalAlpha=.3;cx.fill();cx.globalAlpha=1;
+  } else {
+    for(let i=0;i<n;i++){
+      const a=(i/n)*Math.PI*2;
+      cx.beginPath();
+      cx.moveTo(0,0);
+      cx.lineTo(Math.cos(a)*r*1.6,Math.sin(a)*r*1.6);
+      cx.strokeStyle=f.pal.p;cx.lineWidth=3.5*f.sc;cx.lineCap='round';cx.stroke();
     }
+    cx.beginPath();cx.arc(0,0,r*.48,0,Math.PI*2);
+    cx.fillStyle=f.pal.c;cx.fill();
+  }
+  cx.restore();
+}
 
-    function createFlower(x, y) {
-        const type = FLOWER_TYPES[Math.floor(Math.random() * FLOWER_TYPES.length)];
-        const sc = getScale(y);
-        flowers.push({
-            x, y, sc, type,
-            h: 0, maxH: (40 + Math.random() * 30) * sc,
-            seed: Math.random() * 100,
-            growSpeed: 1 + Math.random()
-        });
-        flowers.sort((a,b) => a.y - b.y);
-    }
+function drawParticles(){
+  particles.forEach(p=>{
+    cx.save();
+    cx.translate(p.x,p.y);cx.rotate(p.rot);
+    cx.globalAlpha=Math.max(0,p.life);
+    cx.fillStyle=p.col;
+    cx.beginPath();cx.ellipse(0,0,p.r,p.r*.55,0,0,Math.PI*2);cx.fill();
+    cx.restore();cx.globalAlpha=1;
+    p.x+=p.vx+wind*.8;p.y+=p.vy;p.vy+=.15;p.vx*=.98;
+    p.rot+=p.rv;p.life-=p.decay;
+  });
+  particles=particles.filter(p=>p.life>0);
+}
 
-    function addToInventory(name) {
-        inventory[name] = (inventory[name] || 0) + 1;
-        updateInventoryUI();
-    }
+let mousePos=null;
+function drawCursor(){
+  if(tool!=='cut'||!mousePos)return;
+  cx.font=`26px serif`;
+  cx.fillText('✂️',mousePos.x+3,mousePos.y+8);
+}
 
-    function updateInventoryUI() {
-        const list = document.getElementById('inv-list');
-        const items = Object.entries(inventory);
-        if (items.length === 0) {
-            list.innerHTML = '<div class="inv-empty">Vide...</div>';
-            return;
-        }
-        list.innerHTML = items.map(([name, count]) => `
-            <div class="inv-item"><span>${name}</span> <b>x${count}</b></div>
-        `).join('');
-    }
+function frame(now){
+  ts=now*.001;
+  wt=Math.sin(ts*.15)*0.7+Math.sin(ts*.07)*.35;
+  wind+=(wt-wind)*.025;
+  cx.clearRect(0,0,W,H);
+  drawSky(ts);
+  drawGround();
+  const rowBuckets=Array.from({length:ROWS},()=>({blades:[],flowers:[]}));
+  blades.forEach(b=>rowBuckets[b.row].blades.push(b));
+  flowers.forEach(f=>{if(!f.dead)rowBuckets[f.row].flowers.push(f);});
+  for(let row=0;row<ROWS;row++){
+    rowBuckets[row].blades.forEach(b=>drawBlade(b,ts));
+    rowBuckets[row].flowers.forEach(f=>drawFlower(f,ts));
+  }
+  drawParticles();
+  drawCursor();
+  requestAnimationFrame(frame);
+}
 
-    function drawFlower(f) {
-        if (f.h < f.maxH) f.h += f.growSpeed;
-        const sway = Math.sin(time + f.seed) * 10 * f.sc;
-        const tx = f.x + sway;
-        const ty = f.y - f.h;
-
-        // Tige
-        ctx.strokeStyle = '#27ae60';
-        ctx.lineWidth = 3 * f.sc;
-        ctx.beginPath();
-        ctx.moveTo(f.x, f.y);
-        ctx.quadraticCurveTo(f.x + sway*0.5, f.y - f.h*0.5, tx, ty);
-        ctx.stroke();
-
-        // Tête
-        ctx.save();
-        ctx.translate(tx, ty);
-        ctx.rotate(time * 0.2 + f.seed);
-        ctx.fillStyle = f.type.main;
-        
-        if (f.type.shape === 'tall') { // Style Lavande
-            for(let i=0; i<6; i++) {
-                ctx.beginPath(); ctx.ellipse(0, -i*5*f.sc, f.type.size, f.type.size*1.5, 0, 0, Math.PI*2); ctx.fill();
-            }
-        } else {
-            for (let i = 0; i < f.type.petals; i++) {
-                ctx.rotate((Math.PI * 2) / f.type.petals);
-                ctx.beginPath();
-                if(f.type.shape === 'star') ctx.rect(f.type.size, -2, f.type.size, 4);
-                else ctx.ellipse(f.type.size, 0, f.type.size, f.type.size*0.6, 0, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            ctx.fillStyle = f.type.center;
-            ctx.beginPath(); ctx.arc(0, 0, f.type.size * 0.5, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.restore();
-    }
-
-    function update() {
-        time += 0.02;
-        // Déplacement
-        let moving = false;
-        if (keys['KeyW'] || keys['ArrowUp']) { player.vy -= player.speed; moving = true; }
-        if (keys['KeyS'] || keys['ArrowDown']) { player.vy += player.speed; moving = true; }
-        if (keys['KeyA'] || keys['ArrowLeft']) { player.vx -= player.speed; player.dir = -1; moving = true; }
-        if (keys['KeyD'] || keys['ArrowRight']) { player.vx += player.speed; player.dir = 1; moving = true; }
-
-        player.vx *= player.friction; player.vy *= player.friction;
-        player.x += player.vx; player.y += player.vy;
-
-        // Saut
-        if (player.isJumping) {
-            player.vz += player.gravity;
-            player.z += player.vz;
-            if (player.z > 0) {
-                player.z = 0;
-                player.vz = 0;
-                player.isJumping = false;
-            }
-        }
-
-        // Limites
-        player.x = Math.max(20, Math.min(w-20, player.x));
-        player.y = Math.max(HORIZON()+10, Math.min(h-20, player.y));
-    }
-
-    function draw() {
-        ctx.clearRect(0,0,w,h);
-
-        // Ciel dégradé type image
-        const sky = ctx.createLinearGradient(0,0,0,HORIZON());
-        sky.addColorStop(0, '#5ea3db'); sky.addColorStop(1, '#a1d9f3');
-        ctx.fillStyle = sky; ctx.fillRect(0,0,w,HORIZON());
-
-        // Rendu herbe + fleurs + perso (triés par Y pour la profondeur)
-        const allEntities = [
-            ...blades.map(b => ({...b, type:'blade'})),
-            ...flowers.map(f => ({...f, type:'flower'})),
-            { x: player.x, y: player.y, type:'player' }
-        ].sort((a,b) => a.y - b.y);
-
-        allEntities.forEach(e => {
-            if (e.type === 'blade') {
-                const sway = Math.sin(time + e.off) * 5 * e.sc;
-                ctx.strokeStyle = e.c;
-                ctx.lineWidth = e.w;
-                ctx.beginPath();
-                ctx.moveTo(e.x, e.y);
-                ctx.quadraticCurveTo(e.x, e.y - e.h*0.5, e.x + sway, e.y - e.h);
-                ctx.stroke();
-            } else if (e.type === 'flower') {
-                drawFlower(e);
-            } else if (e.type === 'player') {
-                const sc = getScale(player.y);
-                ctx.save();
-                ctx.translate(player.x, player.y + player.z); // Z est négatif quand on saute
-                ctx.scale(player.dir * sc, sc);
-                
-                // Ombre
-                ctx.fillStyle = 'rgba(0,0,0,0.1)';
-                ctx.beginPath(); ctx.ellipse(0, -player.z/sc, 20, 8, 0, 0, Math.PI*2); ctx.fill();
-
-                // Corps Chibi
-                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.roundRect(-15, -35, 30, 30, 8); ctx.fill();
-                ctx.fillStyle = '#ffdbac'; ctx.beginPath(); ctx.roundRect(-18, -65, 36, 35, 12); ctx.fill();
-                ctx.fillStyle = '#2c3e50'; // Yeux
-                ctx.beginPath(); ctx.arc(7,-50,2.5,0,Math.PI*2); ctx.arc(-7,-50,2.5,0,Math.PI*2); ctx.fill();
-                ctx.restore();
-            }
-        });
-
-        requestAnimationFrame(() => { update(); draw(); });
-    }
-
-    canvas.addEventListener('mousedown', e => {
-        if (e.clientY < HORIZON()) return;
-        if (tool === 'plant') {
-            createFlower(e.clientX, e.clientY);
-        } else {
-            // Couper et ajouter à l'inventaire
-            flowers = flowers.filter(f => {
-                const d = Math.hypot(f.x - e.clientX, (f.y - f.h) - e.clientY);
-                if (d < 40) {
-                    addToInventory(f.type.name);
-                    return false;
-                }
-                return true;
-            });
-        }
-    });
-
-    window.addEventListener('resize', init);
-    init(); draw();
+wrap.addEventListener('click',e=>{
+  const r=wrap.getBoundingClientRect();
+  const mx=e.clientX-r.left,my=e.clientY-r.top;
+  if(my<HORIZON()-10)return;
+  if(tool==='plant')addFlower(mx,my);
+  else cutFlower(mx,my);
+});
+wrap.addEventListener('mousemove',e=>{
+  const r=wrap.getBoundingClientRect();
+  mousePos={x:e.clientX-r.left,y:e.clientY-r.top};
+});
+wrap.addEventListener('mouseleave',()=>mousePos=null);
+window.addEventListener('resize',rsz);
+rsz();
+requestAnimationFrame(frame);
 </script>
-</body>
-</html>
