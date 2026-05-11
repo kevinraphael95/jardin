@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>ForestSimulator - Twilight Shadows</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; cursor: crosshair; }
+        #ui-stats {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 500px; display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+        }
+        .bar-bg { width: 100%; height: 6px; background: rgba(0,0,0,0.8); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .bar-fill { height: 100%; transition: width 0.1s; }
+        #hp { background: #911; } #mp { background: #119; } #sp { background: #191; }
+        #top-ui { position: absolute; top: 20px; left: 20px; color: #f0e6d2; font-family: 'Cinzel'; text-shadow: 2px 2px 5px #000; }
+    </style>
+</head>
+<body>
+
+<div id="top-ui"><h2>FOREST SIMULATOR</h2><p>Ambiance Originale & Ombres</p></div>
+<div id="ui-stats">
+    <div class="bar-bg"><div id="mp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="hp" class="bar-fill" style="width:100%"></div></div>
+    <div class="bar-bg"><div id="sp" class="bar-fill" style="width:100%"></div></div>
+</div>
+
+<script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/PointerLockControls.js';
+
+    const scene = new THREE.Scene();
+    const twilightColor = 0x2a3a4a;
+    scene.background = new THREE.Color(twilightColor);
+    scene.fog = new THREE.FogExp2(twilightColor, 0.006);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 4000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true; // ACTIVATION DES OMBRES
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+
+    // --- SKYBOX SOMBRE ---
+    const skyGeo = new THREE.SphereGeometry(2000, 32, 32);
+    const skyMat = new THREE.MeshBasicMaterial({ color: 0x1a252f, side: THREE.BackSide });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    scene.add(sky);
+
+    // --- LUMIÈRE ---
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x080808, 0.4));
+    const sun = new THREE.DirectionalLight(0xfff0dd, 2.0);
+    sun.position.set(100, 300, 100);
+    sun.castShadow = true;
+    // Réglages finesse des ombres
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -500;
+    sun.shadow.camera.right = 500;
+    sun.shadow.camera.top = 500;
+    sun.shadow.camera.bottom = -500;
+    scene.add(sun);
+
+    // --- TERRAIN ---
+    const groundGeo = new THREE.PlaneGeometry(1000, 1000, 100, 100);
+    const pos = groundGeo.attributes.position.array;
+    for(let i=0; i<pos.length; i+=3) {
+        pos[i+2] = Math.sin(pos[i]*0.03) * Math.cos(pos[i+1]*0.03) * 10;
+    }
+    groundGeo.computeVertexNormals();
+    const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({ color: 0x1a2b10, roughness: 1 }));
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true; // REÇOIT LES OMBRES
+    scene.add(ground);
+    ground.updateMatrixWorld();
+
+    const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+    function findY(x, z) {
+        raycaster.ray.origin.set(x, 100, z);
+        const hit = raycaster.intersectObject(ground);
+        return hit.length > 0 ? hit[0].point.y : 0;
+    }
+
+    const windObjs = [];
+    const colliders = [];
+    const fireflies = [];
+
+    // --- FLORE ---
+    function spawnFlower(x, z) {
+        const y = findY(x, z);
+        const flowerGroup = new THREE.Group();
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.8), new THREE.MeshStandardMaterial({color: 0x2d4c1e}));
+        stem.position.y = 0.4;
+        stem.castShadow = true;
+        flowerGroup.add(stem);
+        const colors = [0xff4444, 0x4444ff, 0xffff44, 0xffffff];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), new THREE.MeshStandardMaterial({color: color}));
+        head.position.y = 0.8;
+        head.castShadow = true;
+        flowerGroup.add(head);
+        flowerGroup.position.set(x, y, z);
+        scene.add(flowerGroup);
+        windObjs.push({ mesh: flowerGroup, phase: Math.random() * 5, speed: 2, amp: 0.05 });
+    }
+
+    function spawnTree(x, z) {
+        const y = findY(x, z);
+        const treeGroup = new THREE.Group();
+        const height = 15 + Math.random() * 20;
+        const trunkThickness = 0.8 + Math.random() * 0.8;
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(trunkThickness * 0.4, trunkThickness, height, 8), new THREE.MeshStandardMaterial({color: 0x1a0f0a}));
+        trunk.position.y = height / 2 - 0.5;
+        trunk.castShadow = true; // PROJETTE UNE OMBRE
+        trunk.receiveShadow = true;
+        treeGroup.add(trunk);
+        const layerCount = 6 + Math.floor(Math.random() * 6);
+        for(let i=0; i<layerCount; i++) {
+            const ratio = i / layerCount;
+            const size = (1 - ratio) * (trunkThickness * 8) + 1;
+            const layer = new THREE.Mesh(new THREE.ConeGeometry(size, 6, 8), new THREE.MeshStandardMaterial({color: 0x0a1a0a}));
+            layer.position.y = height * 0.3 + (ratio * height * 0.8);
+            layer.castShadow = true;
+            layer.receiveShadow = true;
+            treeGroup.add(layer);
+            windObjs.push({ mesh: layer, phase: Math.random() * 5, speed: 0.5, amp: 0.02 });
+        }
+        treeGroup.position.set(x, y, z);
+        scene.add(treeGroup);
+        colliders.push({ x: x, z: z, r: trunkThickness + 0.5 });
+    }
+
+    function spawnFirefly() {
+        const f = new THREE.PointLight(0xffff00, 1, 3);
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({color: 0xffff00}));
+        const group = new THREE.Group();
+        group.add(f); group.add(m);
+        const x = (Math.random()-0.5)*400, z = (Math.random()-0.5)*400;
+        group.position.set(x, findY(x,z)+2, z);
+        scene.add(group);
+        fireflies.push({mesh: group, phase: Math.random()*Math.PI*2});
+    }
+
+    for(let i=0; i<120; i++) spawnTree((Math.random()-0.5)*600, (Math.random()-0.5)*600);
+    for(let i=0; i<400; i++) spawnFlower((Math.random()-0.5)*300, (Math.random()-0.5)*300);
+    for(let i=0; i<50; i++) spawnFirefly();
+
+    // --- CONTROLES & MOUVEMENTS ---
+    const controls = new PointerLockControls(camera, document.body);
+    document.body.addEventListener('click', () => controls.lock());
+    let velocity = new THREE.Vector3(), keys = { z:false, s:false, q:false, d:false, shift:false };
+    let jumpVel = 0, isGrounded = true, stamina = 100;
+
+    document.addEventListener('keydown', (e) => { 
+        const k = e.key.toLowerCase();
+        if(keys.hasOwnProperty(k)) keys[k] = true;
+        if(e.shiftKey) keys.shift = true;
+        if(e.code === 'Space' && isGrounded) { jumpVel = 0.25; isGrounded = false; }
+    });
+    document.addEventListener('keyup', (e) => { 
+        const k = e.key.toLowerCase();
+        if(keys.hasOwnProperty(k)) keys[k] = false;
+        if(!e.shiftKey) keys.shift = false;
+    });
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        const t = time * 0.001;
+
+        windObjs.forEach(obj => { obj.mesh.rotation.z = Math.sin(t * obj.speed + obj.phase) * obj.amp; });
+        fireflies.forEach(f => {
+            f.mesh.position.y += Math.sin(t + f.phase)*0.02;
+            f.mesh.position.x += Math.cos(t*0.5 + f.phase)*0.05;
+        });
+
+        if(controls.isLocked) {
+            const isRunning = keys.shift && stamina > 0 && keys.z;
+            const accel = isRunning ? 0.04 : 0.02;
+            if(isRunning) stamina -= 0.4; else stamina = Math.min(100, stamina + 0.2);
+            document.getElementById('sp').style.width = stamina + "%";
+
+            const f = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const r = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+            f.y = 0; r.y = 0; f.normalize(); r.normalize();
+
+            if(keys.z) velocity.add(f.multiplyScalar(accel));
+            if(keys.s) velocity.sub(f.multiplyScalar(accel));
+            if(keys.q) velocity.sub(r.multiplyScalar(accel));
+            if(keys.d) velocity.add(r.multiplyScalar(accel));
+
+            velocity.multiplyScalar(0.9);
+
+            let nextX = camera.position.x + velocity.x;
+            let nextZ = camera.position.z + velocity.z;
+            colliders.forEach(c => {
+                const dist = Math.sqrt((nextX - c.x)**2 + (nextZ - c.z)**2);
+                if(dist < c.r) {
+                    const angle = Math.atan2(nextZ - c.z, nextX - c.x);
+                    nextX = c.x + Math.cos(angle) * c.r;
+                    nextZ = c.z + Math.sin(angle) * c.r;
+                    velocity.multiplyScalar(0.8);
+                }
+            });
+
+            camera.position.x = nextX;
+            camera.position.z = nextZ;
+
+            const groundY = findY(camera.position.x, camera.position.z) + 1.8;
+            jumpVel -= 0.01; 
+            camera.position.y += jumpVel;
+
+            if(camera.position.y <= groundY) {
+                camera.position.y = groundY;
+                jumpVel = 0;
+                isGrounded = true;
+            }
+        }
+        renderer.render(scene, camera);
+    }
+    animate(0);
+</script>
+</body>
+</html>
