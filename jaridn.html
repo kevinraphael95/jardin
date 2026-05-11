@@ -3,93 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mon Jardin Interactif</title>
+    <title>Mon Jardin Japonais & Inventaire</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { 
-            background: #1a1a1a; 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            min-height: 100vh; 
-            overflow: hidden; 
-            font-family: 'Segoe UI', system-ui, sans-serif; 
-        }
-        
-        #game-container {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-            overflow: hidden;
-            background: #87ceeb;
-        }
+        body { background: #1a1a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #game-container { width: 100vw; height: 100vh; position: relative; overflow: hidden; background: #87ceeb; }
+        canvas { display: block; width: 100%; height: 100%; }
 
-        canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
+        /* UI Outils */
+        .ui { position: absolute; top: 20px; left: 20px; display: flex; flex-direction: column; gap: 15px; z-index: 100; }
+        .btn { width: 60px; height: 60px; border-radius: 18px; border: 3px solid white; background: rgba(255,255,255,0.8); font-size: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 15px rgba(0,0,0,0.2); backdrop-filter: blur(5px); }
+        .btn.active { background: #ffd87a; border-color: #d4a017; transform: scale(1.1); }
 
-        /* Interface utilisateur */
-        .ui {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-            z-index: 100;
-        }
+        /* Inventaire */
+        .inventory { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.2); border-radius: 15px; padding: 15px; color: white; min-width: 150px; backdrop-filter: blur(10px); z-index: 100; }
+        .inv-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px; display: flex; align-items: center; gap: 5px; }
+        .inv-item { display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0; }
+        .inv-empty { font-style: italic; opacity: 0.6; font-size: 12px; }
 
-        .btn {
-            width: 55px;
-            height: 55px;
-            border-radius: 16px;
-            border: 3px solid rgba(255,255,255,0.9);
-            background: rgba(255,255,255,0.8);
-            font-size: 26px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            backdrop-filter: blur(5px);
-        }
-
-        .btn:hover { transform: scale(1.1); background: #fff; }
-        .btn.active {
-            background: #ffd87a;
-            border-color: #d4a017;
-            box-shadow: 0 0 20px rgba(212,160,23,0.5);
-        }
-
-        .hud {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px 25px;
-            border-radius: 50px;
-            font-size: 14px;
-            pointer-events: none;
-            backdrop-filter: blur(8px);
-            z-index: 100;
-            text-align: center;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        kbd {
-            background: #333;
-            padding: 3px 8px;
-            border-radius: 5px;
-            font-family: monospace;
-            font-weight: bold;
-            color: #ffda79;
-            margin: 0 3px;
-        }
+        .hud { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 25px; border-radius: 50px; font-size: 13px; z-index: 100; border: 1px solid rgba(255,255,255,0.1); }
+        kbd { background: #333; padding: 2px 6px; border-radius: 4px; color: #ffda79; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -98,259 +31,253 @@
     <canvas id="canvas"></canvas>
     
     <div class="ui">
-        <div class="btn active" id="btn-plant" title="Planter des fleurs" onclick="setTool('plant')">🌱</div>
-        <div class="btn" id="btn-cut" title="Couper les fleurs" onclick="setTool('cut')">✂️</div>
+        <div class="btn active" id="btn-plant" onclick="setTool('plant')">🌱</div>
+        <div class="btn" id="btn-cut" onclick="setTool('cut')">✂️</div>
+    </div>
+
+    <div class="inventory" id="inventory">
+        <div class="inv-title">📦 Inventaire</div>
+        <div id="inv-list"><div class="inv-empty">Vide...</div></div>
     </div>
 
     <div class="hud">
-        Déplacement : <kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> | Action : <kbd>Clic Souris</kbd>
+        <kbd>Z Q S D</kbd> Marcher | <kbd>ESPACE</kbd> Sauter | <kbd>CLIC</kbd> Action
     </div>
 </div>
 
 <script>
-    const container = document.getElementById('game-container');
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
-    
-    let w, h;
-    let tool = 'plant';
-    let flowers = [];
-    let blades = [];
-    let time = 0;
-    let wind = 0;
+    let w, h, tool = 'plant';
+    let flowers = [], blades = [], time = 0;
+    let inventory = {};
 
-    // --- PERSONNAGE ---
+    // --- CONFIG PERSONNAGE ---
     const player = {
-        x: 0, y: 0,
+        x: window.innerWidth/2, y: window.innerHeight/2,
         vx: 0, vy: 0,
-        speed: 5,
-        friction: 0.82,
+        speed: 2.8, // Vitesse réduite comme demandé
+        friction: 0.85,
         dir: 1,
-        isMoving: false,
-        headColor: '#ffdbac',
-        clothColor: '#3498db'
+        z: 0, // Hauteur du saut
+        vz: 0,
+        isJumping: false,
+        gravity: 0.5
     };
 
     const keys = {};
-    window.addEventListener('keydown', e => keys[e.code] = true);
+    window.addEventListener('keydown', e => {
+        keys[e.code] = true;
+        if(e.code === 'Space' && !player.isJumping) {
+            player.vz = -8;
+            player.isJumping = true;
+        }
+    });
     window.addEventListener('keyup', e => keys[e.code] = false);
+
+    // --- TYPES DE FLEURS (Variétés réelles) ---
+    const FLOWER_TYPES = [
+        { name: 'Coquelicot', main: '#e74c3c', center: '#2c3e50', petals: 4, size: 10, shape: 'round' },
+        { name: 'Marguerite', main: '#ffffff', center: '#f1c40f', petals: 12, size: 8, shape: 'daisy' },
+        { name: 'Bleuet', main: '#3498db', center: '#2980b9', petals: 8, size: 7, shape: 'star' },
+        { name: 'Lavande', main: '#9b59b6', center: '#8e44ad', petals: 3, size: 4, shape: 'tall' },
+        { name: 'Souci', main: '#f39c12', center: '#d35400', petals: 10, size: 9, shape: 'round' }
+    ];
 
     function setTool(t) {
         tool = t;
         document.getElementById('btn-plant').classList.toggle('active', t === 'plant');
         document.getElementById('btn-cut').classList.toggle('active', t === 'cut');
-        container.style.cursor = t === 'cut' ? 'none' : 'crosshair';
     }
 
-    // --- PERSPECTIVE & GRILLE ---
-    const ROWS = 12; 
-    const HORIZON_RATIO = 0.42;
-    const getHorizon = () => h * HORIZON_RATIO;
-    const getY = (row) => getHorizon() + (row / ROWS) * (h - getHorizon());
-    const getScale = (y) => 0.2 + 0.8 * ((y - getHorizon()) / (h - getHorizon()));
-    const getRow = (y) => Math.floor(((y - getHorizon()) / (h - getHorizon())) * ROWS);
+    const ROWS = 15; 
+    const HORIZON = () => h * 0.4;
+    const getY = (row) => HORIZON() + (row / ROWS) * (h - HORIZON());
+    const getScale = (y) => 0.3 + 0.7 * ((y - HORIZON()) / (h - HORIZON()));
 
     function init() {
         w = canvas.width = window.innerWidth;
         h = canvas.height = window.innerHeight;
-        player.x = w / 2;
-        player.y = h * 0.7;
-        
         blades = [];
-        for (let r = 0; r < ROWS; r++) {
-            const rowY = getY(r);
-            const sc = getScale(rowY);
-            const density = Math.floor((w / 3) * (0.4 + sc));
-            for (let i = 0; i < density; i++) {
-                blades.push({
-                    x: Math.random() * w,
-                    row: r,
-                    y: rowY + (Math.random() * 20 - 10),
-                    sc: sc,
-                    h: (25 + Math.random() * 35) * sc,
-                    w: (1.5 + Math.random() * 2.5) * sc,
-                    offset: Math.random() * Math.PI * 2,
-                    color: `hsl(${95 + Math.random() * 30}, ${35 + r * 3}%, ${20 + r * 2}%)`
-                });
-            }
+        // Génération d'une herbe plus "organique" et moins alignée
+        for (let i = 0; i < 600; i++) {
+            const ry = HORIZON() + Math.random() * (h - HORIZON());
+            const sc = getScale(ry);
+            blades.push({
+                x: Math.random() * w,
+                y: ry,
+                sc: sc,
+                h: (20 + Math.random() * 30) * sc,
+                w: (1 + Math.random() * 2) * sc,
+                off: Math.random() * 100,
+                c: `hsl(${80 + Math.random() * 40}, ${30 + (ry/h)*20}%, ${20 + (ry/h)*15}%)`
+            });
         }
+        blades.sort((a,b) => a.y - b.y);
     }
-
-    const FLOWER_PALETTES = [
-        { main: '#ff6b6b', center: '#feca57', stem: '#2ecc71' },
-        { main: '#ff9ff3', center: '#feca57', stem: '#27ae60' },
-        { main: '#48dbfb', center: '#ff9f43', stem: '#229954' },
-        { main: '#feca57', center: '#ff6b6b', stem: '#1e8449' },
-        { main: '#1dd1a1', center: '#fff', stem: '#10ac84' }
-    ];
 
     function createFlower(x, y) {
-        const row = getRow(y);
-        if (row < 0 || row >= ROWS) return;
-        
+        const type = FLOWER_TYPES[Math.floor(Math.random() * FLOWER_TYPES.length)];
         const sc = getScale(y);
         flowers.push({
-            x, y, row, sc,
-            h: 0,
-            maxH: (50 + Math.random() * 40) * sc,
-            palette: FLOWER_PALETTES[Math.floor(Math.random() * FLOWER_PALETTES.length)],
-            petals: 5 + Math.floor(Math.random() * 3),
-            size: (9 + Math.random() * 7) * sc,
-            seed: Math.random() * 100
+            x, y, sc, type,
+            h: 0, maxH: (40 + Math.random() * 30) * sc,
+            seed: Math.random() * 100,
+            growSpeed: 1 + Math.random()
         });
-        flowers.sort((a, b) => a.y - b.y);
+        flowers.sort((a,b) => a.y - b.y);
     }
 
-    function drawPlayer(sc) {
-        const bounce = player.isMoving ? Math.abs(Math.sin(time * 12)) * 10 * sc : 0;
-        
-        ctx.save();
-        ctx.translate(player.x, player.y - bounce);
-        ctx.scale(player.dir * sc, sc);
+    function addToInventory(name) {
+        inventory[name] = (inventory[name] || 0) + 1;
+        updateInventoryUI();
+    }
 
-        // Ombre portée
-        ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        ctx.beginPath();
-        ctx.ellipse(0, 5, 22, 8, 0, 0, Math.PI * 2);
-        ctx.fill();
+    function updateInventoryUI() {
+        const list = document.getElementById('inv-list');
+        const items = Object.entries(inventory);
+        if (items.length === 0) {
+            list.innerHTML = '<div class="inv-empty">Vide...</div>';
+            return;
+        }
+        list.innerHTML = items.map(([name, count]) => `
+            <div class="inv-item"><span>${name}</span> <b>x${count}</b></div>
+        `).join('');
+    }
 
-        // Corps
-        ctx.fillStyle = player.clothColor;
+    function drawFlower(f) {
+        if (f.h < f.maxH) f.h += f.growSpeed;
+        const sway = Math.sin(time + f.seed) * 10 * f.sc;
+        const tx = f.x + sway;
+        const ty = f.y - f.h;
+
+        // Tige
+        ctx.strokeStyle = '#27ae60';
+        ctx.lineWidth = 3 * f.sc;
         ctx.beginPath();
-        ctx.roundRect(-16, -30, 32, 28, [2, 2, 10, 10]);
-        ctx.fill();
+        ctx.moveTo(f.x, f.y);
+        ctx.quadraticCurveTo(f.x + sway*0.5, f.y - f.h*0.5, tx, ty);
+        ctx.stroke();
 
         // Tête
-        ctx.fillStyle = player.headColor;
-        ctx.beginPath();
-        ctx.roundRect(-20, -65, 40, 38, 14);
-        ctx.fill();
-
-        // Visage
-        ctx.fillStyle = '#2c3e50';
-        ctx.beginPath();
-        ctx.arc(8, -48, 2.5, 0, Math.PI * 2); // Oeil D
-        ctx.arc(-8, -48, 2.5, 0, Math.PI * 2); // Oeil G
-        ctx.fill();
+        ctx.save();
+        ctx.translate(tx, ty);
+        ctx.rotate(time * 0.2 + f.seed);
+        ctx.fillStyle = f.type.main;
         
-        // Joues roses
-        ctx.fillStyle = '#ff7675';
-        ctx.globalAlpha = 0.4;
-        ctx.beginPath();
-        ctx.arc(14, -40, 4, 0, Math.PI * 2);
-        ctx.arc(-14, -40, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-
+        if (f.type.shape === 'tall') { // Style Lavande
+            for(let i=0; i<6; i++) {
+                ctx.beginPath(); ctx.ellipse(0, -i*5*f.sc, f.type.size, f.type.size*1.5, 0, 0, Math.PI*2); ctx.fill();
+            }
+        } else {
+            for (let i = 0; i < f.type.petals; i++) {
+                ctx.rotate((Math.PI * 2) / f.type.petals);
+                ctx.beginPath();
+                if(f.type.shape === 'star') ctx.rect(f.type.size, -2, f.type.size, 4);
+                else ctx.ellipse(f.type.size, 0, f.type.size, f.type.size*0.6, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.fillStyle = f.type.center;
+            ctx.beginPath(); ctx.arc(0, 0, f.type.size * 0.5, 0, Math.PI * 2); ctx.fill();
+        }
         ctx.restore();
     }
 
-    function loop() {
-        time += 0.016;
-        wind = Math.sin(time * 0.6) * 0.5 + Math.sin(time * 1.3) * 0.2;
+    function update() {
+        time += 0.02;
+        // Déplacement
+        let moving = false;
+        if (keys['KeyW'] || keys['ArrowUp']) { player.vy -= player.speed; moving = true; }
+        if (keys['KeyS'] || keys['ArrowDown']) { player.vy += player.speed; moving = true; }
+        if (keys['KeyA'] || keys['ArrowLeft']) { player.vx -= player.speed; player.dir = -1; moving = true; }
+        if (keys['KeyD'] || keys['ArrowRight']) { player.vx += player.speed; player.dir = 1; moving = true; }
 
-        // Inputs
-        player.isMoving = false;
-        if (keys['KeyW'] || keys['ArrowUp']) { player.vy -= player.speed * 0.6; player.isMoving = true; }
-        if (keys['KeyS'] || keys['ArrowDown']) { player.vy += player.speed * 0.6; player.isMoving = true; }
-        if (keys['KeyA'] || keys['ArrowLeft']) { player.vx -= player.speed; player.dir = -1; player.isMoving = true; }
-        if (keys['KeyD'] || keys['ArrowRight']) { player.vx += player.speed; player.dir = 1; player.isMoving = true; }
+        player.vx *= player.friction; player.vy *= player.friction;
+        player.x += player.vx; player.y += player.vy;
 
-        player.vx *= player.friction;
-        player.vy *= player.friction;
-        player.x += player.vx;
-        player.y += player.vy;
-
-        // World Bounds
-        player.x = Math.max(30, Math.min(w - 30, player.x));
-        player.y = Math.max(getHorizon() + 20, Math.min(h - 10, player.y));
-
-        // Draw
-        ctx.clearRect(0, 0, w, h);
-
-        // Sky
-        const skyGrd = ctx.createLinearGradient(0, 0, 0, getHorizon());
-        skyGrd.addColorStop(0, '#3498db');
-        skyGrd.addColorStop(1, '#a8e6cf');
-        ctx.fillStyle = skyGrd;
-        ctx.fillRect(0, 0, w, getHorizon());
-
-        const playerRow = getRow(player.y);
-
-        // Depth Rendering
-        for (let r = 0; r < ROWS; r++) {
-            // Sol
-            ctx.fillStyle = `hsl(115, ${25 + r * 2}%, ${18 + r * 2}%)`;
-            ctx.fillRect(0, getY(r), w, (h - getHorizon()) / ROWS + 2);
-
-            // Herbe
-            blades.filter(b => b.row === r).forEach(b => {
-                const sway = Math.sin(time * 2 + b.offset) * 8 * b.sc + wind * 25 * b.sc;
-                ctx.beginPath();
-                ctx.moveTo(b.x, b.y);
-                ctx.quadraticCurveTo(b.x + wind * 8, b.y - b.h * 0.5, b.x + sway, b.y - b.h);
-                ctx.strokeStyle = b.color;
-                ctx.lineWidth = b.w;
-                ctx.lineCap = 'round';
-                ctx.stroke();
-            });
-
-            // Fleurs
-            flowers.filter(f => f.row === r).forEach(f => {
-                if (f.h < f.maxH) f.h += 1.5;
-                const sway = Math.sin(time + f.seed) * 6 * f.sc + wind * 18 * f.sc;
-                const tx = f.x + sway;
-                const ty = f.y - f.h;
-
-                // Stem
-                ctx.beginPath();
-                ctx.moveTo(f.x, f.y);
-                ctx.quadraticCurveTo(f.x + wind * 5, f.y - f.h * 0.5, tx, ty);
-                ctx.strokeStyle = f.palette.stem;
-                ctx.lineWidth = 3.5 * f.sc;
-                ctx.stroke();
-
-                // Head
-                ctx.save();
-                ctx.translate(tx, ty);
-                ctx.rotate(time * 0.4 + f.seed);
-                ctx.fillStyle = f.palette.main;
-                for (let i = 0; i < f.petals; i++) {
-                    ctx.rotate((Math.PI * 2) / f.petals);
-                    ctx.beginPath();
-                    ctx.ellipse(f.size, 0, f.size * 0.9, f.size * 0.45, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.fillStyle = f.palette.center;
-                ctx.beginPath(); ctx.arc(0, 0, f.size * 0.4, 0, Math.PI * 2); ctx.fill();
-                ctx.restore();
-            });
-
-            // Personnage
-            if (r === playerRow) drawPlayer(getScale(player.y));
+        // Saut
+        if (player.isJumping) {
+            player.vz += player.gravity;
+            player.z += player.vz;
+            if (player.z > 0) {
+                player.z = 0;
+                player.vz = 0;
+                player.isJumping = false;
+            }
         }
 
-        // Custom Cursor
-        if (tool === 'cut' && mouse) {
-            ctx.font = '32px serif';
-            ctx.fillText('✂️', mouse.x - 10, mouse.y + 10);
-        }
-
-        requestAnimationFrame(loop);
+        // Limites
+        player.x = Math.max(20, Math.min(w-20, player.x));
+        player.y = Math.max(HORIZON()+10, Math.min(h-20, player.y));
     }
 
-    let mouse = null;
-    canvas.addEventListener('mousemove', e => mouse = { x: e.clientX, y: e.clientY });
+    function draw() {
+        ctx.clearRect(0,0,w,h);
+
+        // Ciel dégradé type image
+        const sky = ctx.createLinearGradient(0,0,0,HORIZON());
+        sky.addColorStop(0, '#5ea3db'); sky.addColorStop(1, '#a1d9f3');
+        ctx.fillStyle = sky; ctx.fillRect(0,0,w,HORIZON());
+
+        // Rendu herbe + fleurs + perso (triés par Y pour la profondeur)
+        const allEntities = [
+            ...blades.map(b => ({...b, type:'blade'})),
+            ...flowers.map(f => ({...f, type:'flower'})),
+            { x: player.x, y: player.y, type:'player' }
+        ].sort((a,b) => a.y - b.y);
+
+        allEntities.forEach(e => {
+            if (e.type === 'blade') {
+                const sway = Math.sin(time + e.off) * 5 * e.sc;
+                ctx.strokeStyle = e.c;
+                ctx.lineWidth = e.w;
+                ctx.beginPath();
+                ctx.moveTo(e.x, e.y);
+                ctx.quadraticCurveTo(e.x, e.y - e.h*0.5, e.x + sway, e.y - e.h);
+                ctx.stroke();
+            } else if (e.type === 'flower') {
+                drawFlower(e);
+            } else if (e.type === 'player') {
+                const sc = getScale(player.y);
+                ctx.save();
+                ctx.translate(player.x, player.y + player.z); // Z est négatif quand on saute
+                ctx.scale(player.dir * sc, sc);
+                
+                // Ombre
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.beginPath(); ctx.ellipse(0, -player.z/sc, 20, 8, 0, 0, Math.PI*2); ctx.fill();
+
+                // Corps Chibi
+                ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.roundRect(-15, -35, 30, 30, 8); ctx.fill();
+                ctx.fillStyle = '#ffdbac'; ctx.beginPath(); ctx.roundRect(-18, -65, 36, 35, 12); ctx.fill();
+                ctx.fillStyle = '#2c3e50'; // Yeux
+                ctx.beginPath(); ctx.arc(7,-50,2.5,0,Math.PI*2); ctx.arc(-7,-50,2.5,0,Math.PI*2); ctx.fill();
+                ctx.restore();
+            }
+        });
+
+        requestAnimationFrame(() => { update(); draw(); });
+    }
+
     canvas.addEventListener('mousedown', e => {
-        if (e.clientY < getHorizon()) return;
-        if (tool === 'plant') createFlower(e.clientX, e.clientY);
-        else flowers = flowers.filter(f => Math.hypot(f.x - e.clientX, (f.y - f.h) - e.clientY) > 35);
+        if (e.clientY < HORIZON()) return;
+        if (tool === 'plant') {
+            createFlower(e.clientX, e.clientY);
+        } else {
+            // Couper et ajouter à l'inventaire
+            flowers = flowers.filter(f => {
+                const d = Math.hypot(f.x - e.clientX, (f.y - f.h) - e.clientY);
+                if (d < 40) {
+                    addToInventory(f.type.name);
+                    return false;
+                }
+                return true;
+            });
+        }
     });
 
     window.addEventListener('resize', init);
-    init();
-    loop();
+    init(); draw();
 </script>
-
 </body>
 </html>
