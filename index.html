@@ -130,291 +130,60 @@
     const container = document.getElementById('jardin-container');
     
     let w, h;
-    let tool = 'semer';
-    let flora = []; // Stocke fleurs et herbes, triés par profondeur
-    let time = 0;
-    let groundTextures = [];
-
-    // --- Paramètres de Croissance ---
-    // Ces facteurs contrôlent la vitesse relative de croissance
-    const GROWTH_RATE_STEM = 0.02;  // Croissance lente de la tige (par frame)
-    const GROWTH_RATE_PETAL = 0.05; // Éclosion plus rapide
-    const MAX_FLOWER_LIFE = 2000;    // Durée de vie optionnelle
-
-    function selectTool(t) {
-        tool = t;
-        document.getElementById('btn-semer').classList.toggle('active', t === 'semer');
-        document.getElementById('btn-tailler').classList.toggle('active', t === 'tailler');
-        container.className = t === 'tailler' ? 'cut-mode' : 'plant-mode';
-    }
-
-    // --- PERSPECTIVE & GRILLE ---
-    const HORIZON_RATIO = 0.48; // Horizon plus bas pour un grand jardin
-    const getHorizon = () => h * HORIZON_RATIO;
-    // Fonction de perspective : plus on s'éloigne (y diminue), plus c'est petit
-    const getScale = (y) => {
-        const horizon = getHorizon();
-        const range = h - horizon;
-        const normalizedY = (y - horizon) / range;
-        return 0.15 + 0.85 * Math.pow(normalizedY, 1.5); // Échelle non-linéaire
-    };
-
-    // --- GÉNÉRATION DE TEXTURES BIO ---
-    function generateGroundTexture() {
-        // Créer des motifs de terre et d'herbe réalistes
-        const texCanvas = document.createElement('canvas');
-        texCanvas.width = 256;
-        texCanvas.height = 256;
-        const texCtx = texCanvas.getContext('2d');
-        
-        // Base terre
-        texCtx.fillStyle = '#3a2a1a';
-        texCtx.fillRect(0,0,256,256);
-        
-        // Bruit de terre
-        for(let i=0; i<2000; i++) {
-            texCtx.fillStyle = `rgba(10, 5, 0, ${Math.random() * 0.3})`;
-            texCtx.fillRect(Math.random()*256, Math.random()*256, 2, 2);
-        }
-        // Base herbe diffuse
-        for(let i=0; i<1000; i++) {
-            texCtx.fillStyle = `rgba(50, 80, 20, ${Math.random() * 0.4})`;
-            texCtx.fillRect(Math.random()*256, Math.random()*256, 4, 10);
-        }
-        return ctx.createPattern(texCanvas, 'repeat');
-    }
+    let flora = [];
 
     function init() {
         w = canvas.width = window.innerWidth;
         h = canvas.height = window.innerHeight;
-        flora = [];
-        groundTextures = [generateGroundTexture()];
-        
-        // Générer une couverture d'herbe de base réaliste
-        const density = (w * h) / 1500; 
-        for (let i = 0; i < density; i++) {
-            generateGrassBlade();
-        }
-        flora.sort((a, b) => a.y - b.y); // Tri initial par profondeur
     }
 
-    // --- TYPES DE FLEURS RÉALISTES ---
-    const FLOWER_SPECIES = [
-        { name: 'Coquelicot', main: '#d32f2f', center: '#1a1a1a', stem: '#3e5622', petals: 4, shape: 'oval', size: 10, stemW: 1.5 },
-        { name: 'Marguerite', main: '#f0f0f0', center: '#fbc02d', stem: '#4a702b', petals: 12, shape: 'drop', size: 8, stemW: 2 },
-        { name: 'Bleuet', main: '#1976d2', center: '#0d47a1', stem: '#2e7d32', petals: 8, shape: 'jagged', size: 7, stemW: 1.8 },
-        { name: 'Bouton d\'or', main: '#ffeb3b', center: '#fbc02d', stem: '#558b2f', petals: 5, shape: 'round', size: 9, stemW: 2.2 }
-    ];
-
-    // Créer une herbe de base
-    function generateGrassBlade() {
-        const y = getHorizon() + Math.random() * (h - getHorizon());
-        const sc = getScale(y);
-        flora.push({
-            type: 'grass',
-            x: Math.random() * w,
-            y: y,
-            sc: sc,
-            h: (15 + Math.random() * 25) * sc,
-            w: (1 + Math.random() * 1.5) * sc,
-            angle: (Math.random() - 0.5) * 0.2,
-            color: `hsl(${90 + Math.random() * 25}, ${40 + Math.random() * 20}%, ${15 + Math.random() * 10}%)`,
-            swayOffset: Math.random() * Math.PI * 2
-        });
-    }
-
-    // Planter une graine de fleur
     function plantSeed(x, y) {
-        if (y < getHorizon()) return;
-        
-        const sc = getScale(y);
-        const species = FLOWER_SPECIES[Math.floor(Math.random() * FLOWER_SPECIES.length)];
-        
+        if (y < h * 0.48) return; // Empêche de planter dans le ciel
         flora.push({
-            type: 'flower',
-            x, y, sc,
-            species: species,
-            
-            // ÉTATS DE CROISSANCE
-            stage: 'seed', // seed -> sprout -> stem -> bud -> bloom
-            stemH: 0, 
-            targetStemH: (60 + Math.random() * 50) * sc,
-            petalSize: 0,
-            targetPetalSize: (species.size + Math.random() * 4) * sc,
-            
-            seed: Math.random() * 100, // Pour la variation organique
-            colorVar: Math.random() * 10 - 5 // Variation de couleur de la même espèce
+            x, y,
+            stemH: 0,
+            targetH: 50 + Math.random() * 50,
+            petals: 0,
+            targetPetals: 10,
+            growth: 0 // 0 à 1 (croissance complète)
         });
-        
-        flora.sort((a, b) => a.y - b.y); // Retrier pour la profondeur
-        updateFlowerCount();
-    }
-
-    // --- DESSIN ULTRA-RÉALISTE ---
-
-    // Dessiner une tige de fleur réaliste
-    function drawRealStem(ctx, f, windSway) {
-        const tx = f.x + windSway;
-        const ty = f.y - f.stemH;
-        
-        ctx.beginPath();
-        ctx.moveTo(f.x, f.y);
-        
-        // Courbe de tige organique
-        const cp1x = f.x + windSway * 0.4;
-        const cp1y = f.y - f.stemH * 0.5;
-        const cp2x = f.x + windSway * 0.8;
-        const cp2y = f.y - f.stemH * 0.8;
-        
-        ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, tx, ty);
-        
-        ctx.strokeStyle = f.species.stem;
-        ctx.lineWidth = f.species.stemW * f.sc;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-    }
-
-    // Dessiner une tête de fleur réaliste
-    function drawRealFlowerHead(ctx, f, tx, ty, rot) {
-        ctx.save();
-        ctx.translate(tx, ty);
-        ctx.rotate(rot);
-        
-        // Variation de couleur subtile
-        ctx.fillStyle = `hsl(${parseInt(f.species.main.slice(1), 16) % 360 + f.colorVar}, 70%, 50%)`;
-        
-        // Dessiner les pétales un par un pour le réalisme
-        const numPetals = f.species.petals;
-        for (let i = 0; i < numPetals; i++) {
-            ctx.save();
-            ctx.rotate((Math.PI * 2 / numPetals) * i);
-            
-            ctx.beginPath();
-            if (f.species.shape === 'oval') {
-                ctx.ellipse(f.petalSize * 1.1, 0, f.petalSize, f.petalSize * 0.5, 0, 0, Math.PI * 2);
-            } else if (f.species.shape === 'drop') {
-                // Forme de goutte
-                ctx.moveTo(0,0);
-                ctx.bezierCurveTo(f.petalSize, -f.petalSize*0.6, f.petalSize*1.5, f.petalSize*0.6, 0, 0);
-            } else {
-                ctx.arc(f.petalSize, 0, f.petalSize, 0, Math.PI * 2);
-            }
-            ctx.fill();
-            
-            // Nervures de pétales (subtiles)
-            ctx.strokeStyle = 'rgba(0,0,0,0.05)';
-            ctx.lineWidth = 0.5 * f.sc;
-            ctx.stroke();
-            
-            ctx.restore();
-        }
-        
-        // Cœur de la fleur
-        ctx.fillStyle = f.species.center;
-        ctx.beginPath();
-        ctx.arc(0, 0, f.petalSize * 0.4, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Texture du cœur
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        for(let j=0; j<6; j++) {
-            ctx.beginPath();
-            ctx.arc((Math.random()-0.5)*f.petalSize*0.3, (Math.random()-0.5)*f.petalSize*0.3, f.sc, 0, Math.PI*2);
-            ctx.fill();
-        }
-
-        ctx.restore();
+        document.getElementById('flower-count').innerText = flora.length;
     }
 
     function loop() {
-        time += 0.01;
-        const wind = Math.sin(time * 0.5) * 0.5 + Math.sin(time * 1.1) * 0.2; // Vent organique
-
         ctx.clearRect(0, 0, w, h);
-
-        // --- SOL RÉALISTE ---
-        ctx.fillStyle = groundTextures[0];
-        ctx.fillRect(0, getHorizon(), w, h - getHorizon());
         
-        // Gradient de profondeur sur le sol
-        const groundGrd = ctx.createLinearGradient(0, getHorizon(), 0, h);
-        groundGrd.addColorStop(0, 'rgba(10, 15, 10, 0.9)'); // Foncé au loin
-        groundGrd.addColorStop(1, 'rgba(60, 70, 50, 0)');  // Clair devant
-        ctx.fillStyle = groundGrd;
-        ctx.fillRect(0, getHorizon(), w, h - getHorizon());
+        // Dessin du sol
+        ctx.fillStyle = '#4a543a';
+        ctx.fillRect(0, h * 0.48, w, h);
 
-        // --- RENDU DE LA FLORE ---
-        flora.forEach(item => {
-            const windSway = Math.sin(time * 1.5 + item.swayOffset) * 5 * item.sc + wind * 20 * item.sc;
+        flora.forEach((f, index) => {
+            // Augmente la valeur de croissance à chaque frame (vitesse réglable)
+            if (f.growth < 1) f.growth += 0.01; 
 
-            if (item.type === 'grass') {
-                // Herbe réaliste
-                const tx = item.x + windSway + Math.sin(item.swayOffset)*item.h*0.2;
-                const ty = item.y - item.h;
+            const currentH = f.targetH * f.growth;
+            const currentPetals = f.targetPetals * f.growth;
+
+            // Dessin tige
+            ctx.strokeStyle = '#3e5622';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(f.x, f.y);
+            ctx.lineTo(f.x, f.y - currentH);
+            ctx.stroke();
+
+            // Dessin pétales (seulement si la tige a bien poussé)
+            if (f.growth > 0.5) {
+                ctx.fillStyle = '#d32f2f';
                 ctx.beginPath();
-                ctx.moveTo(item.x, item.y);
-                ctx.quadraticCurveTo(item.x + wind * 10 * item.sc, item.y - item.h * 0.6, tx, ty);
-                ctx.strokeStyle = item.color;
-                ctx.lineWidth = item.w;
-                ctx.stroke();
-            } 
-            else if (item.type === 'flower') {
-                // --- LOGIQUE DE CROISSANCE RÉELLE ---
-                if (item.stemH < item.targetStemH) {
-                    item.stemH += GROWTH_RATE_STEM * item.targetStemH; // Croissance tige
-                } else if (item.petalSize < item.targetPetalSize) {
-                    item.petalSize += GROWTH_RATE_PETAL * item.targetPetalSize; // Éclosion
-                }
-                
-                // Dessiner si visible
-                if (item.stemH > 1) {
-                    const fx = item.x + windSway;
-                    const fy = item.y - item.stemH;
-                    
-                    drawRealStem(ctx, item, windSway);
-                    
-                    if (item.petalSize > 0.5) {
-                        const rot = Math.sin(time * 0.2 + item.seed) * 0.1;
-                        drawRealFlowerHead(ctx, item, fx, fy, rot);
-                    }
-                }
+                ctx.arc(f.x, f.y - currentH, currentPetals * 1.5, 0, Math.PI * 2);
+                ctx.fill();
             }
         });
-
-        // --- EFFETS ATMOSPHÉRIQUES subtils (Bloom) ---
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = 'rgba(200, 230, 255, 0.03)';
-        ctx.fillRect(0, 0, w, getHorizon());
-        ctx.globalCompositeOperation = 'source-over';
-
         requestAnimationFrame(loop);
     }
 
-    function updateFlowerCount() {
-        document.getElementById('flower-count').innerText = flora.filter(f => f.type === 'flower').length;
-    }
-
-    // --- INTERACTIONS SOURIS ---
-    canvas.addEventListener('mousedown', e => {
-        if (tool === 'semer') {
-            // Planter plusieurs graines autour du clic pour un effet naturel
-            for(let i=0; i<3; i++) {
-                const rx = e.clientX + (Math.random()-0.5) * 40;
-                const ry = e.clientY + (Math.random()-0.5) * 20;
-                plantSeed(rx, ry);
-            }
-        } else if (tool === 'tailler') {
-            // Tailler les fleurs proches
-            const cutRadius = 50;
-            flora = flora.filter(f => {
-                if (f.type !== 'flower') return true;
-                const dist = Math.hypot(f.x - e.clientX, (f.y - f.stemH) - e.clientY);
-                return dist > cutRadius;
-            });
-            updateFlowerCount();
-        }
-    });
-
+    canvas.addEventListener('mousedown', (e) => plantSeed(e.clientX, e.clientY));
     window.addEventListener('resize', init);
     init();
     loop();
